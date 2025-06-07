@@ -77,6 +77,7 @@ class BasePruningFunc(ABC):
         raise NotImplementedError
 
     def check(self, layer, idxs, to_output):
+        """ 检查索引是否超出范围 """
         if self.TARGET_MODULES is not None:
             assert isinstance(layer, self.TARGET_MODULES), 'Mismatched pruner {} and module {}'.format(
                 self.__str__, layer)
@@ -89,11 +90,15 @@ class BasePruningFunc(ABC):
                        0 for idx in idxs), "All pruning indices should fall into [{}, {})".format(0, prunable_channels)
 
     def __call__(self, layer: nn.Module, idxs: Sequence[int], to_output: bool = True, inplace: bool = True, dry_run: bool = False) -> Tuple[nn.Module, int]:
+        # 索引排序
         idxs.sort()
+        # 校验索引
         self.check(layer, idxs, to_output)
+        # 选择剪枝方法
         pruning_fn = self.prune_out_channels if to_output else self.prune_in_channels
         if not inplace:
             layer = deepcopy(layer)
+        # 剪枝
         layer = pruning_fn(layer, idxs)
         return layer
 
@@ -104,23 +109,29 @@ class BasePruningFunc(ABC):
         return 1
 
     def _prune_parameter_and_grad(self, weight, keep_idxs, pruning_dim):
+        # 沿指定维度保留指定索引的通道
         pruned_weight = torch.nn.Parameter(torch.index_select(weight, pruning_dim, torch.LongTensor(keep_idxs).to(weight.device).contiguous()))
+        # 梯度同步：确保梯度与权重剪枝同步
         if weight.grad is not None:
             pruned_weight.grad = torch.index_select(weight.grad, pruning_dim, torch.LongTensor(keep_idxs).to(weight.device))
+        # 设备一致性：保持参数与原始设备一致
         return pruned_weight.to(weight.device)
 
 class ConvPruner(BasePruningFunc):
     TARGET_MODULE = ops.TORCH_CONV
 
     def prune_out_channels(self, layer: nn.Module, idxs: Sequence[int]) -> nn.Module:
+        # 1. 计算保留通道索引
         keep_idxs = list(set(range(layer.out_channels)) - set(idxs))
         keep_idxs.sort()
+        # 2. 更新层元数据，剪枝层
         layer.out_channels = layer.out_channels-len(idxs)
+        # 3. 处理权重参数，剪枝权重
         if not layer.transposed:
             layer.weight = self._prune_parameter_and_grad(layer.weight, keep_idxs, 0)
         else:
             layer.weight = self._prune_parameter_and_grad(layer.weight, keep_idxs, 1)
-        
+        # 4. 处理偏置参数，剪枝偏置
         if layer.bias is not None:
             layer.bias = self._prune_parameter_and_grad(layer.bias, keep_idxs, 0)
         return layer
@@ -137,6 +148,7 @@ class ConvPruner(BasePruningFunc):
         else:
             layer.weight = self._prune_parameter_and_grad(layer.weight, keep_idxs, 0)
         # no bias pruning because it does not change the output channels
+        # 偏置与输出通道数相关，与输入通道数无关
         return layer
 
     def get_out_channels(self, layer):
@@ -156,11 +168,14 @@ class DepthwiseConvPruner(ConvPruner):
     TARGET_MODULE = ops.TORCH_CONV
 
     def prune_out_channels(self, layer: nn.Module, idxs: Sequence[int]) -> nn.Module:
+        # 1. 计算保留通道索引
         keep_idxs = list(set(range(layer.out_channels)) - set(idxs))
         keep_idxs.sort()
+        # 2. 更新层元数据
         layer.out_channels = layer.out_channels-len(idxs)
         layer.in_channels = layer.in_channels-len(idxs)
-        layer.groups = layer.groups-len(idxs)
+        layer.groups = layer.groups-len(idxs) # 深度可分离的groups=in_channels
+        # 3. 处理深度卷积权重
         layer.weight = self._prune_parameter_and_grad(layer.weight, keep_idxs, 0)
         if layer.bias is not None:
             layer.bias = self._prune_parameter_and_grad(layer.bias, keep_idxs, 0)

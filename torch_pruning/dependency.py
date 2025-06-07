@@ -24,10 +24,10 @@ class Node(object):
         self.type = ops.module2type(module) # node type (enum), op.OPTYPE
         self.module_class = module.__class__ # class type of the module
 
-        # For Dependency Modeling
-        self.dependencies = []  # Adjacency List. It contains the dependencies to other nodes.
-        self.enable_index_mapping = True # enable index mapping for torch.cat/split/chunck/...
-        self.pruning_dim = -1 # pruning dimension for the module, whill be set dynamically by the Depdenency
+        # For Dependency Modeling 依赖关系
+        self.dependencies = []  # 依赖关系列表 Adjacency List. It contains the dependencies to other nodes.
+        self.enable_index_mapping = True # 是否启用索引映射 enable index mapping for torch.cat/split/chunck/...
+        self.pruning_dim = -1 # 剪枝维度 pruning dimension for the module, whill be set dynamically by the Depdenency
 
     @property
     def name(self):

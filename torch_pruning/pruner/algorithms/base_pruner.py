@@ -13,6 +13,8 @@ class BasePruner:
     """
     Meta pruner for structural pruning.   
     It implements the group-level pruning strategy powered by Dependency Graph.  
+    用于结构修剪的元修剪器。   
+    它实现了由依赖图支持的组级修剪策略。  
     See https://arxiv.org/abs/2301.12900 for details.
 
     Args:
@@ -47,35 +49,35 @@ class BasePruner:
 
     def __init__(
         self,
-        # Basic
+        # Basic 基础参数
         model: nn.Module, # a simple pytorch model
         example_inputs: torch.Tensor, # a dummy input for graph tracing. Should be on the same 
-        importance: typing.Callable, # tp.importance.Importance for group importance estimation
-        global_pruning: bool = False, # https://pytorch.org/tutorials/intermediate/pruning_tutorial.html#global-pruning.
-        pruning_ratio: float = 0.5,  # channel/dim pruning ratio, also known as pruning ratio
+        importance: typing.Callable, # 重要性评估函数 tp.importance.Importance for group importance estimation
+        global_pruning: bool = False, # 全局剪枝 https://pytorch.org/tutorials/intermediate/pruning_tutorial.html#global-pruning.
+        pruning_ratio: float = 0.5,  # 剪枝率 channel/dim pruning ratio, also known as pruning ratio
         pruning_ratio_dict: typing.Dict[typing.Union[nn.Module, typing.Tuple[nn.Module]], float] = None, # layer-specific pruning ratio. Will cover pruning_ratio if specified. The key of the dict can be a single module or a tuple of modules. The pruning ratio will be shared by all modules in the tuple. 
-        max_pruning_ratio: float = 1.0, # maximum pruning ratio. useful if over-pruning happens.
-        iterative_steps: int = 1,  # for iterative pruning
-        iterative_pruning_ratio_scheduler: typing.Callable = linear_scheduler, # scheduler for iterative pruning.
+        max_pruning_ratio: float = 1.0, # 最大剪枝比率，防止过度剪枝 maximum pruning ratio. useful if over-pruning happens.
+        iterative_steps: int = 1,  # 迭代剪枝步数 for iterative pruning
+        iterative_pruning_ratio_scheduler: typing.Callable = linear_scheduler, # 迭代调度器 scheduler for iterative pruning.
         ignored_layers: typing.List[nn.Module] = None, # ignored layers
-        round_to: int = None,  # round channels to the nearest multiple of round_to
-        isomorphic: bool = False, # enable isomorphic pruning (ECCV 2024, https://arxiv.org/abs/2407.04616) if global_pruning=True. 
+        round_to: int = None,  # 通道数四舍五入到最近的整数倍 round channels to the nearest multiple of round_to
+        isomorphic: bool = False, # 同构剪枝 enable isomorphic pruning (ECCV 2024, https://arxiv.org/abs/2407.04616) if global_pruning=True. 
 
-        # Advanced
-        in_channel_groups: typing.Dict[nn.Module, int] = dict(), # The number of channel groups for layer input
-        out_channel_groups: typing.Dict[nn.Module, int] = dict(), # The number of channel groups for layer output
-        num_heads: typing.Dict[nn.Module, int] = dict(), # The number of heads for multi-head attention
-        prune_num_heads: bool = False, # remove entire heads in multi-head attention
-        prune_head_dims: bool = True, # remove head dimensions in multi-head attention
-        head_pruning_ratio: float = 0.0, # head pruning ratio
+        # Advanced 高级参数
+        in_channel_groups: typing.Dict[nn.Module, int] = dict(), # 输入通道分组数 The number of channel groups for layer input
+        out_channel_groups: typing.Dict[nn.Module, int] = dict(), # 输出通道分组数 The number of channel groups for layer output
+        num_heads: typing.Dict[nn.Module, int] = dict(), # 多头注意力头数 The number of heads for multi-head attention
+        prune_num_heads: bool = False, # 是否移除整个注意力头 remove entire heads in multi-head attention
+        prune_head_dims: bool = True, # 是否剪头内维度 remove head dimensions in multi-head attention
+        head_pruning_ratio: float = 0.0, # 头剪枝比例 head pruning ratio
         head_pruning_ratio_dict: typing.Dict[nn.Module, float] = None, # layer-specific head pruning ratio
-        customized_pruners: typing.Dict[typing.Any, function.BasePruningFunc] = None, # pruners for customized layers. E.g., {nn.Linear: my_linear_pruner}
-        unwrapped_parameters: typing.Dict[nn.Parameter, int] = None, # unwrapped nn.Parameters & pruning_dims. For example, {ViT.pos_emb: 0}
-        root_module_types: typing.List = [ops.TORCH_CONV, ops.TORCH_LINEAR, ops.TORCH_LSTM],  # root module for each group
-        forward_fn: typing.Callable = None, # a function to execute model.forward
-        output_transform: typing.Callable = None, # a function to transform network outputs
+        customized_pruners: typing.Dict[typing.Any, function.BasePruningFunc] = None, # 自定义剪枝函数字典 pruners for customized layers. E.g., {nn.Linear: my_linear_pruner}
+        unwrapped_parameters: typing.Dict[nn.Parameter, int] = None, # 特殊参数处理 unwrapped nn.Parameters & pruning_dims. For example, {ViT.pos_emb: 0}
+        root_module_types: typing.List = [ops.TORCH_CONV, ops.TORCH_LINEAR, ops.TORCH_LSTM],  # 剪枝根模块类型 root module for each group
+        forward_fn: typing.Callable = None, # 自定义前向函数 a function to execute model.forward
+        output_transform: typing.Callable = None, # 自定义输出转换 a function to transform network outputs
         
-        # deprecated
+        # deprecated 弃用参数
         channel_groups: typing.Dict[nn.Module, int] = dict(), # channel grouping
         ch_sparsity: float = None,
         ch_sparsity_dict: typing.Dict[nn.Module, float] = None, 
@@ -111,7 +113,7 @@ class BasePruner:
         self.root_module_types = root_module_types
         self.round_to = round_to
 
-        # MHA
+        # MHA multi-head attention 多头自注意力
         self.num_heads = num_heads
         self.prune_num_heads = prune_num_heads
         self.prune_head_dims = prune_head_dims
@@ -123,8 +125,10 @@ class BasePruner:
         self.ignored_params = []
         if ignored_layers is not None:
             for layer in ignored_layers:
+                # 如果是模块，递归添加所有子模块到 ignored_layers
                 if isinstance(layer, nn.Module):
                     self.ignored_layers.extend(list(layer.modules()))
+                # 如果是参数，直接添加到 ignored_params
                 elif isinstance(layer, nn.Parameter):
                     self.ignored_params.append(layer)
 
@@ -133,11 +137,11 @@ class BasePruner:
         self.DG = dependency.DependencyGraph().build_dependency(
             model,
             example_inputs=example_inputs,
-            forward_fn=forward_fn,
-            output_transform=output_transform,
-            unwrapped_parameters=unwrapped_parameters,
-            customized_pruners=customized_pruners,
-            ignored_params=self.ignored_params,
+            forward_fn=forward_fn, # 自定义前向函数
+            output_transform=output_transform, # 输出转换函数
+            unwrapped_parameters=unwrapped_parameters, # 需要解包的参数
+            customized_pruners=customized_pruners, # 自定义剪枝器
+            ignored_params=self.ignored_params, # 忽略参数列表
         )
 
         ###############################################
